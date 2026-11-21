@@ -22,16 +22,15 @@ jobs:
         uses: actions/checkout@v4
 
       # ======================================================
-      # Node.js
+      # Node.js (تم إزالة cache: "npm" هنا)
       # ======================================================
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       # ======================================================
-      # Install Dependencies (بدون Playwright)
+      # Install Dependencies
       # ======================================================
       - name: Install dependencies
         run: |
