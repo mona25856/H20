@@ -1,0 +1,135 @@
+name: WOLF Event Bot
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: wolf-event-bot
+  cancel-in-progress: true
+
+jobs:
+  wolf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      # ======================================================
+      # Checkout
+      # ======================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ======================================================
+      # Node.js
+      # ======================================================
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ======================================================
+      # Install Dependencies (بدون Playwright)
+      # ======================================================
+      - name: Install dependencies
+        run: |
+          echo "📦 Installing dependencies..."
+          npm install
+          echo "✅ Dependencies installed"
+
+      # ======================================================
+      # التحقق من WOLF_TOKENS_PAT
+      # ======================================================
+      - name: Verify WOLF_TOKENS_PAT
+        env:
+          WOLF_TOKENS_PAT: ${{ secrets.WOLF_TOKENS_PAT }}
+        run: |
+          if [ -z "$WOLF_TOKENS_PAT" ]; then
+            echo "❌ WOLF_TOKENS_PAT is NOT available"
+            exit 1
+          fi
+          echo "✅ WOLF_TOKENS_PAT is available"
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token $WOLF_TOKENS_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/anaayaar-ops/too/contents/tokens.json")
+
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Failed to access too/tokens.json: HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ Access to too/tokens.json confirmed"
+
+      # ======================================================
+      # Run Bot
+      # ======================================================
+      - name: Run WOLF Event Task
+        env:
+          WOLF_TOKENS_PAT: ${{ secrets.WOLF_TOKENS_PAT }}
+        run: |
+          echo "========================================"
+          echo "🐺 WOLF EVENT BOT (tokens from anaayaar-ops/too)"
+          echo "========================================"
+          echo "🕐 Start: $(date -u)"
+          echo "========================================"
+
+          RUN_SECONDS=18000
+          START_TIME=$(date +%s)
+          END_TIME=$((START_TIME + RUN_SECONDS))
+
+          cleanup() {
+            echo ""
+            echo "🧹 WOLF CLEANUP"
+            if [ -n "$BOT_PID" ] && kill -0 "$BOT_PID" 2>/dev/null; then
+              echo "📡 Sending SIGTERM to PID $BOT_PID..."
+              kill -TERM -- "-$BOT_PID" 2>/dev/null || true
+              sleep 8
+              if kill -0 "$BOT_PID" 2>/dev/null; then
+                echo "💀 Sending SIGKILL..."
+                kill -KILL -- "-$BOT_PID" 2>/dev/null || true
+              fi
+            fi
+            echo "✅ Cleanup done"
+          }
+          trap cleanup EXIT INT TERM
+
+          setsid npm start &
+          BOT_PID=$!
+          echo "🐺 WOLF PID: $BOT_PID"
+
+          while true; do
+            NOW=$(date +%s)
+
+            if [ "$NOW" -ge "$END_TIME" ]; then
+              echo "⏰ 5 HOURS COMPLETED at $(date -u)"
+              exit 0
+            fi
+
+            if ! kill -0 "$BOT_PID" 2>/dev/null; then
+              echo "⚠️ WOLF STOPPED UNEXPECTEDLY"
+              wait "$BOT_PID" 2>/dev/null || true
+              exit 1
+            fi
+
+            ELAPSED=$((NOW - START_TIME))
+            H=$((ELAPSED / 3600))
+            M=$(((ELAPSED % 3600) / 60))
+            S=$((ELAPSED % 60))
+            echo "🐺 WOLF running | ⏱️ ${H}h ${M}m ${S}s | $(date -u)"
+            sleep 30
+          done
+
+      # ======================================================
+      # Final Cleanup
+      # ======================================================
+      - name: Final Cleanup
+        if: always()
+        run: |
+          echo "🧹 FINAL CLEANUP"
+          pkill -TERM -f "node check-wolf.js" 2>/dev/null || true
+          sleep 2
+          pkill -KILL -f "node check-wolf.js" 2>/dev/null || true
+          echo "✅ Final cleanup completed"
